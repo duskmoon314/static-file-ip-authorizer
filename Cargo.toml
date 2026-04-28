@@ -5,5 +5,18 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8.9"
+clap = { version = "4.5.51", features = ["derive"] }
+ipnet = "2.11.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
 toasty = { version = "0.4.0", features = ["sqlite"] }
+toasty-driver-sqlite = "0.4.0"
 tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
+tower-http = { version = "0.6.6", features = ["trace"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+uuid = "1.18.1"
+
+[dev-dependencies]
+tower = { version = "0.5.2", features = ["util"] }

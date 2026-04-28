@@ -1,13 +1,106 @@
 # static-file-ip-authorizer
 
-A simple IP authorizer that works with caddy/nginx to allow/deny access to specified static files based on the client's
-IP address, which is useful for datasets sharing.
+A small auth service for static-file gateways (Caddy/Nginx).
+
+It decides whether a request is allowed based on:
+
+1. Requested URI path (directory-prefix rules).
+2. Client IP (`X-Forwarded-For`).
+3. Rule mode:
+   - `public = true` => allow.
+   - `public = false` => allow only if client IP matches whitelist entries (IP or CIDR).
+
+Default behavior is **deny** if no rule matches.
+
+> Note: An empty database will cause no uri to be allowed, so make sure to add rules.
+
+## Run
+
+```bash
+cargo run --release -- \
+  --bind-addr 0.0.0.0:3000 \
+  --database-path /var/lib/static-file-ip-authorizer/static-file-ip-authorizer.db \
+  --log-filter info
+```
+
+CLI flags:
+
+- `--bind-addr`: HTTP listen address (default `0.0.0.0:3000`)
+- `--database-path`: SQLite DB path (default `/var/lib/static-file-ip-authorizer/static-file-ip-authorizer.db`)
+- `--log-filter`: tracing filter (default `static_file_ip_authorizer=info,tower_http=info`)
+
 
 ## API
 
 ### `GET /auth`
 
-- `X-Forwarded-For`: The client's IP address
-- `X-Forwarded-URI`: The requested URI
+Headers:
 
-Returns `200 OK` if the client's IP address is allowed to access the requested URI, otherwise returns `403 Forbidden`.
+- `X-Forwarded-For`: client IP (first value is used if comma-separated)
+- `X-Forwarded-Uri`: requested URI path
+
+Response:
+
+- `200 OK`: allowed
+- `403 Forbidden`: denied (or malformed/missing forwarded headers)
+
+### `GET /rules`
+
+Returns all rules in normalized JSON:
+
+```json
+{
+  "rules": [
+    {
+      "dir": "/datasets/private",
+      "public": false,
+      "whitelist": ["10.0.0.0/8", "203.0.113.5"]
+    }
+  ]
+}
+```
+
+### `PUT /rules/public`
+
+Upsert/update a directory rule:
+
+```bash
+curl -sS -X PUT http://127.0.0.1:3000/rules/public \
+  -H 'content-type: application/json' \
+  -d '{"dir":"/datasets/private","public":false}'
+```
+
+### `POST /rules/whitelist`
+
+Append whitelist entries (deduplicated and validated):
+
+```bash
+curl -sS -X POST http://127.0.0.1:3000/rules/whitelist \
+  -H 'content-type: application/json' \
+  -d '{"dir":"/datasets/private","entries":["10.0.0.0/8","203.0.113.5"]}'
+```
+
+## Notes
+
+- Directory matching is recursive prefix matching (longest prefix wins).
+- Whitelist entries support IPv4/IPv6 and CIDR.
+- Existing SQLite DB files are supported on restart.
+- This service is intended to run behind a trusted reverse proxy, not directly on the public internet.
+
+## Integration
+
+### Caddy
+
+```caddyfile
+:80 {
+    forward_auth localhost:3000 {
+        uri /auth
+
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Uri {uri}
+    }
+
+    root * /path/to/static/files
+    file_server browse
+}
+```
