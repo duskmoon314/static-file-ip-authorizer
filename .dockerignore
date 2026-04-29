@@ -1,0 +1,7 @@
+.git
+.github
+.codex
+target
+*.db
+*.sqlite
+*.sqlite3

@@ -19,16 +19,49 @@ Default behavior is **deny** if no rule matches.
 ```bash
 cargo run --release -- \
   --bind-addr 0.0.0.0:3000 \
-  --database-path /var/lib/static-file-ip-authorizer/static-file-ip-authorizer.db \
   --log-filter info
 ```
 
 CLI flags:
 
 - `--bind-addr`: HTTP listen address (default `0.0.0.0:3000`)
-- `--database-path`: SQLite DB path (default `/var/lib/static-file-ip-authorizer/static-file-ip-authorizer.db`)
+- `--database-path`: SQLite DB path (default is the OS user data directory via the `directories` crate, such as `$XDG_DATA_HOME/static-file-ip-authorizer/static-file-ip-authorizer.db` or `$HOME/.local/share/static-file-ip-authorizer/static-file-ip-authorizer.db` on Linux)
 - `--log-filter`: tracing filter (default `static_file_ip_authorizer=info,tower_http=info`)
 
+## Container
+
+The image listens on port `3000` and stores its SQLite database under
+`/var/lib/static-file-ip-authorizer` by default through `XDG_DATA_HOME=/var/lib`.
+Mount that directory as a persistent volume in production.
+
+```bash
+docker build -f Containerfile -t static-file-ip-authorizer:local .
+docker run --rm -p 3000:3000 \
+  -v static-file-ip-authorizer-data:/var/lib/static-file-ip-authorizer \
+  static-file-ip-authorizer:local
+```
+
+To use a SQLite database file from the host, bind mount a host directory to the
+container state directory:
+
+```bash
+mkdir -p ./data
+touch ./data/static-file-ip-authorizer.db
+docker run --rm -p 3000:3000 \
+  -v "$PWD/data:/var/lib/static-file-ip-authorizer" \
+  static-file-ip-authorizer:local
+```
+
+You can also mount a specific database file and pass its path explicitly:
+
+```bash
+mkdir -p ./data
+touch ./data/rules.db
+docker run --rm -p 3000:3000 \
+  -v "$PWD/data/rules.db:/var/lib/static-file-ip-authorizer/rules.db" \
+  static-file-ip-authorizer:local \
+  --database-path /var/lib/static-file-ip-authorizer/rules.db
+```
 
 ## API
 
