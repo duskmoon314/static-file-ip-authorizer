@@ -33,7 +33,8 @@ pub(crate) async fn init_state_with_driver(driver: Sqlite) -> Result<AppState, A
     let db = builder.build(driver).await?;
     if let Err(err) = db.push_schema().await {
         if is_schema_already_initialized_error(&err) {
-            tracing::info!(error = %err, "database schema already initialized, skipping create");
+            debug!(error = %err, "database schema creation skipped");
+            tracing::info!("database schema already initialized");
         } else {
             return Err(err.into());
         }

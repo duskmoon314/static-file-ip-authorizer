@@ -15,7 +15,13 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use anyhow::Context;
 use clap::Parser;
+use std::{
+    fs::{self, OpenOptions},
+    io,
+    path::Path,
+};
 use toasty_driver_sqlite::Sqlite;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -31,19 +37,70 @@ pub(crate) fn init_tracing(filter: &str) {
     fmt().with_env_filter(filter).with_target(false).init();
 }
 
+/// Ensures the configured SQLite database path exists before opening it.
+///
+/// Returns `true` when this call created the database file.
+pub(crate) fn prepare_database_file(path: &Path) -> io::Result<bool> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        if !parent.exists() {
+            fs::create_dir_all(parent)?;
+            tracing::info!(
+                database_directory = %parent.display(),
+                "created database directory"
+            );
+        }
+    }
+
+    match OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(_) => {
+            tracing::info!(database_path = %path.display(), "created database file");
+            Ok(true)
+        }
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+            if path.is_file() {
+                Ok(false)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("database path exists but is not a file: {}", path.display()),
+                ))
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
 /// Starts the authorizer HTTP server.
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_tracing(&cli.log_filter);
 
-    let state = init_state_with_driver(Sqlite::open(&cli.database_path))
+    let database_path = cli.database_path();
+    prepare_database_file(&database_path).with_context(|| {
+        format!(
+            "unable to prepare database file `{}`",
+            database_path.display()
+        )
+    })?;
+    tracing::info!(database_path = %database_path.display(), "using database file");
+
+    let state = init_state_with_driver(Sqlite::open(&database_path))
         .await
-        .expect("database initialization failed");
+        .with_context(|| {
+            format!(
+                "database initialization failed for `{}`",
+                database_path.display()
+            )
+        })?;
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(cli.bind_addr)
         .await
-        .expect("failed to bind listener");
-    axum::serve(listener, app).await.expect("server error");
+        .with_context(|| format!("failed to bind listener `{}`", cli.bind_addr))?;
+    axum::serve(listener, app).await.context("server error")?;
+    Ok(())
 }

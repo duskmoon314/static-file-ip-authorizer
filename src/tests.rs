@@ -204,3 +204,47 @@ async fn init_state_handles_existing_file_db() {
     drop(second);
     let _ = std::fs::remove_file(&path);
 }
+
+/// Startup database preparation should create missing parent directories and files.
+#[test]
+fn prepare_database_file_creates_missing_parent_directory_and_file() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "static-file-ip-authorizer-prepare-{nanos}-{}",
+        std::process::id()
+    ));
+    let path = root.join("state").join("rules.db");
+
+    let created = crate::prepare_database_file(&path).unwrap();
+
+    assert!(created);
+    assert!(path.is_file());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Startup database preparation should not truncate an existing SQLite file.
+#[test]
+fn prepare_database_file_preserves_existing_file() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "static-file-ip-authorizer-prepare-existing-{nanos}-{}",
+        std::process::id()
+    ));
+    let path = root.join("rules.db");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(&path, b"existing").unwrap();
+
+    let created = crate::prepare_database_file(&path).unwrap();
+
+    assert!(!created);
+    assert_eq!(std::fs::read(&path).unwrap(), b"existing");
+
+    let _ = std::fs::remove_dir_all(root);
+}
